@@ -45,11 +45,14 @@ export async function generateQuestionsAction(
 ): Promise<AnyQuestion[] | { error: string }> {
     try {
         // QUESTIONS_PER_SKILL is now correctly imported and used by originalGenerateQuestions
-        const questions = await originalGenerateQuestions(skill, level, QUESTIONS_PER_SKILL);
-        return questions;
-    } catch (error: any) {
-        console.error("Server Action Error (generateQuestionsAction):", error.message);
-        return { error: `Failed to generate questions: ${error.message}` };
+        return originalGenerateQuestions(skill, level, QUESTIONS_PER_SKILL);
+    } catch (error) {
+        if (error instanceof Error) {
+            console.error("Server Action Error (generateQuestionsAction):", error.message);
+            return { error: `Failed to generate questions: ${error.message}` };
+        }
+        console.error("Server Action Error (generateQuestionsAction): Unknown error", error);
+        return { error: "Failed to generate questions: An unknown error occurred" };
     }
 }
 
@@ -59,11 +62,14 @@ export async function assessStudentWritingAction(
     level: CEFRLevel
 ): Promise<WritingAssessmentPayload | { error: string }> {
     try {
-        const assessment = await originalAssessWriting(originalPrompt, studentText, level);
-        return assessment;
-    } catch (error: any) {
-        console.error("Server Action Error (assessStudentWritingAction):", error.message);
-        return { error: `Failed to assess writing: ${error.message}` };
+        return originalAssessWriting(originalPrompt, studentText, level);
+    } catch (error) {
+        if (error instanceof Error) {
+            console.error("Server Action Error (assessStudentWritingAction):", error.message);
+            return { error: `Failed to assess writing: ${error.message}` };
+        }
+        console.error("Server Action Error (assessStudentWritingAction): Unknown error", error);
+        return { error: "Failed to assess writing: An unknown error occurred" };
     }
 }
 
@@ -74,11 +80,14 @@ export async function assessStudentSpeakingAction(
     level: CEFRLevel
 ): Promise<SpeakingAssessmentPayload | { error: string }> {
     try {
-        const assessment = await originalAssessSpeaking(speakingPrompt, audioBase64, audioMimeType, level);
-        return assessment;
-    } catch (error: any) {
-        console.error("Server Action Error (assessStudentSpeakingAction):", error.message);
-        return { error: `Failed to assess speaking: ${error.message}` };
+        return originalAssessSpeaking(speakingPrompt, audioBase64, audioMimeType, level);
+    } catch (error) {
+        if (error instanceof Error) {
+            console.error("Server Action Error (assessStudentSpeakingAction):", error.message);
+            return { error: `Failed to assess speaking: ${error.message}` };
+        }
+        console.error("Server Action Error (assessStudentSpeakingAction): Unknown error", error);
+        return { error: "Failed to assess speaking: An unknown error occurred" };
     }
 }
 
@@ -88,11 +97,14 @@ export async function generateComprehensiveReportAction(
     assessedLevel: CEFRLevel
 ): Promise<FinalReport | { error: string }> {
     try {
-        const report = await originalGenerateReport(studentName, sectionResults, assessedLevel);
-        return report;
-    } catch (error: any) {
-        console.error("Server Action Error (generateComprehensiveReportAction):", error.message);
-        return { error: `Failed to generate report: ${error.message}` };
+        return originalGenerateReport(studentName, sectionResults, assessedLevel);
+    } catch (error) {
+        if (error instanceof Error) {
+            console.error("Server Action Error (generateComprehensiveReportAction):", error.message);
+            return { error: `Failed to generate report: ${error.message}` };
+        }
+        console.error("Server Action Error (generateComprehensiveReportAction): Unknown error", error);
+        return { error: "Failed to generate report: An unknown error occurred" };
     }
 }
 
@@ -104,9 +116,12 @@ export async function generateAudioFromDialogueAction(
         const pcmData: Uint8Array = await originalGenerateAudio(dialogueLines, speakerVoiceMap);
         const audioBase64 = uint8ArrayToBase64(pcmData);
         return { audioBase64 };
-    } catch (error: any)
-    {
-        console.error("Server Action Error (generateAudioFromDialogueAction):", error.message);
-        return { error: `Failed to generate audio: ${error.message}` };
+    } catch (error) {
+        if (error instanceof Error) {
+            console.error("Server Action Error (generateAudioFromDialogueAction):", error.message);
+            return { error: `Failed to generate audio: ${error.message}` };
+        }
+        console.error("Server Action Error (generateAudioFromDialogueAction): Unknown error", error);
+        return { error: "Failed to generate audio: An unknown error occurred" };
     }
 }

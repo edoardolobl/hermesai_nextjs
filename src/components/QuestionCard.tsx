@@ -4,7 +4,7 @@
 import React from 'react';
 import {
     AnyQuestion, MultipleChoiceQuestionType, FillTheBlankQuestion,
-    ReadingComprehensionTask, WritingTask, ListeningComprehensionTask,
+    ReadingComprehensionTask, WritingTask,
     SpeakingTask, QuestionOption, SkillType
 } from '@/types'; // Updated path
 import { ptTranslations } from '@/localization/pt'; // Updated path

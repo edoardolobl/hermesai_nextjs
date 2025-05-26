@@ -37,8 +37,12 @@ try {
     //   analytics = getAnalytics(app);
     // }
     console.log("Firebase initialized with Project ID:", firebaseConfig.projectId);
-} catch (error: any) {
-    console.error("Error initializing Firebase:", error.message);
+} catch (error) {
+    if (error instanceof Error) {
+        console.error("Error initializing Firebase:", error.message);
+    } else {
+        console.error("Error initializing Firebase: An unknown error occurred", error);
+    }
     // Fallback or rethrow, depending on how critical Firebase is at startup
     // For now, we'll let it throw if config is totally missing,
     // but if it's just an issue with a specific service, you might want to handle it.

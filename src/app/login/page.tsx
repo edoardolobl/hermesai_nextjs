@@ -11,7 +11,7 @@ import { ptTranslations } from '@/localization/pt'; // Your translations
 export default function LoginPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const { data: session, status } = useSession();
+    const { status } = useSession();
 
     const [email, setEmail] = useState('');
     const [passcode, setPasscode] = useState(''); // Using 'passcode' for the password field for now

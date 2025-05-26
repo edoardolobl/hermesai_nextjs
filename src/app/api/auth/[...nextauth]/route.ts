@@ -23,7 +23,7 @@ export const authOptions: NextAuthOptions = {
                 password: { label: "Password", type: "password" }
                 // For students, we might later add a passcode field or have a separate provider
             },
-            async authorize(credentials, req): Promise<AppUser | null> {
+            async authorize(credentials, _req): Promise<AppUser | null> {
                 // IMPORTANT: This is where you'll add your own logic to look up the user
                 // from the credentials they provided.
                 //

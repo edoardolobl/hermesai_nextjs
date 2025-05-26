@@ -8,15 +8,14 @@ import { useRouter } from 'next/navigation';
 import {
     CEFRLevel, SkillType, StudentAnswer, SectionResult, FinalReport, AnyQuestion,
     ReadingComprehensionTask, ListeningComprehensionTask, MultipleChoiceQuestionType,
-    FillTheBlankQuestion, WritingTask, SpeakingTask, DialogueLine,
-    WritingAssessmentPayload, SpeakingAssessmentPayload
+    FillTheBlankQuestion, WritingTask, SpeakingTask
 } from '@/types';
 import { WelcomeScreen } from '@/components/WelcomeScreen';
 import { AssessmentView } from '@/components/AssessmentView';
 import { ReportView } from '@/components/ReportView';
 import { Button } from '@/components/Button';
 import {
-    DEFAULT_CEFR_LEVEL, SKILLS_ORDER, QUESTIONS_PER_SKILL, RECORDING_MIME_TYPE,
+    DEFAULT_CEFR_LEVEL, SKILLS_ORDER, RECORDING_MIME_TYPE,
 } from '@/constants';
 import { ptTranslations } from '@/localization/pt';
 
@@ -88,10 +87,14 @@ export const LanguageAssessmentFlow: React.FC = () => {
             const result = await generateQuestionsAction(currentSkill, selectedCefrLevel);
             if ('error' in result) throw new Error(result.error);
             setQuestionsForCurrentSkill(result);
-        } catch (err: any) {
+        } catch (err) {
             console.error("LanguageAssessmentFlow: Error loading questions:", err);
             const skillName = ptTranslations[`skill_${currentSkill?.toLowerCase().replace(/\s+/g, '_') as keyof typeof ptTranslations}`] || currentSkill || "skill";
-            setError(ptTranslations.error_failed_to_load_questions(skillName as string) + ` (${err.message})`);
+            if (err instanceof Error) {
+                setError(ptTranslations.error_failed_to_load_questions(skillName as string) + ` (${err.message})`);
+            } else {
+                setError(ptTranslations.error_failed_to_load_questions(skillName as string) + ` (Unknown error)`);
+            }
             setStage('error');
         } finally {
             setIsLoadingData(false);
@@ -165,8 +168,9 @@ export const LanguageAssessmentFlow: React.FC = () => {
             if (question) {
                 if ('correctAnswerId' in question && (question as MultipleChoiceQuestionType).options) {
                     isCorrect = ans.answer === (question as MultipleChoiceQuestionType).correctAnswerId;
-                } else if ('correctAnswer' in question) {
-                    isCorrect = typeof ans.answer === 'string' && typeof (question as FillTheBlankQuestion).correctAnswer === 'string' && ans.answer.trim().toLowerCase() === (question as FillTheBlankQuestion).correctAnswer.trim().toLowerCase();
+                } else if ('correctAnswer' in question && typeof (question as FillTheBlankQuestion).correctAnswer === 'string') {
+                    // Ensure ans.answer is also a string before comparing
+                    isCorrect = typeof ans.answer === 'string' && ans.answer.trim().toLowerCase() === (question as FillTheBlankQuestion).correctAnswer.trim().toLowerCase();
                 }
             }
             return { ...ans, isCorrect };
@@ -214,12 +218,28 @@ export const LanguageAssessmentFlow: React.FC = () => {
                             email: currentUser.email, name: studentName, lastAssessmentDate: Timestamp.now(),
                         }, { merge: true });
                         setStage('report');
-                    } catch (e: any) { setError("Failed to save results: " + e.message); setStage('report'); }
+                    } catch (e) {
+                        if (e instanceof Error) {
+                            setError("Failed to save results: " + e.message);
+                        } else {
+                            setError("Failed to save results: Unknown error.");
+                        }
+                        setStage('report'); // Proceed to report stage even if save fails, error will be shown.
+                    }
                     finally { setIsSavingToDb(false); }
-                } else { /* ... error handling ... */ }
+                } else {
+                    console.error("LanguageAssessmentFlow: Missing reportResult or user details for Firebase save.");
+                    setError("Could not save results due to missing data. Please try again.");
+                    setStage('report'); // Still go to report stage, but with an error.
+                }
             }
-        } catch (err: any) {
-            setError(`Error processing ${skill}: ${err.message}`); setStage('error');
+        } catch (err) {
+            if (err instanceof Error) {
+                setError(`Error processing ${skill}: ${err.message}`);
+            } else {
+                setError(`Error processing ${skill}: Unknown error occurred.`);
+            }
+            setStage('error');
         } finally {
             setIsSubmittingSection(false);
             if (currentSkillIndex >= SKILLS_ORDER.length - 1) setIsLoadingData(false); // Turn off general loader after report attempt

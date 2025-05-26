@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
     AnyQuestion, SkillType, StudentAnswer, CEFRLevel,
-    ReadingComprehensionTask, ListeningComprehensionTask, SpeakingTask, DialogueLine
+    ReadingComprehensionTask, ListeningComprehensionTask
 } from '@/types';
 import { QuestionCard } from '@/components/QuestionCard';
 import { Button } from '@/components/Button';

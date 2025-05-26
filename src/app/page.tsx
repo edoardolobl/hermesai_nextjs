@@ -7,7 +7,7 @@ import { useSession } from 'next-auth/react';
 import { ptTranslations } from '@/localization/pt'; // For loading message
 
 export default function HomePage() {
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const router = useRouter();
 
   useEffect(() => {

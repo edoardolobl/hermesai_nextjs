@@ -22,9 +22,9 @@ if (!API_KEY) {
             "The Gemini Service will not function. Please ensure GEMINI_API_KEY (without NEXT_PUBLIC_) is in your .env.local file."
         );
     }
-    ai = new GoogleGenAI("DUMMY_API_KEY_FOR_INIT_ONLY_DO_NOT_USE_IN_PROD");
+    ai = new GoogleGenAI({apiKey: "DUMMY_API_KEY_FOR_INIT_ONLY_DO_NOT_USE_IN_PROD"});
 } else {
-    ai = new GoogleGenAI(API_KEY);
+    ai = new GoogleGenAI({apiKey: API_KEY});
 }
 
 const generationConfigForTextModelsJSON = {
@@ -161,8 +161,7 @@ export async function generateAudioFromDialogue(
 
     console.log("SERVER: TTS Request - Model:", GEMINI_MODEL_TTS);
     try {
-        const model = ai.getGenerativeModel({ model: GEMINI_MODEL_TTS });
-        const response = await model.generateContent({ contents: textualContents, generationConfig: configForApi as any });
+        const response = await ai.models.generateContent({ model: GEMINI_MODEL_TTS, contents: textualContents, config: configForApi as any });
         const typedResponse = response as GenerateContentResponse;
         const audioPart = typedResponse.candidates?.[0]?.content?.parts?.find(p => p.inlineData && p.inlineData.mimeType?.startsWith('audio/')) as InlineDataPart | undefined;
         if (!audioPart?.inlineData?.data) throw new Error("No audio data received from TTS model.");
@@ -185,42 +184,81 @@ async function generateMCQQuestions(skill: SkillType, level: CEFRLevel, count: n
     } else if (skill === SkillType.GRAMMAR) {
         specificInstruction = "For grammar questions, focus on common grammatical structures, tenses, prepositions, articles, or sentence construction appropriate for the CEFR level.";
     }
-    const prompt = `You are an expert language assessment creator specializing in ${skill} for English learners. Generate ${count} multiple-choice ${skill.toLowerCase()} questions suitable for a CEFR ${level} English learner. ${specificInstruction} Ensure correct grammar and spelling in all generated text. The difficulty of the questions and vocabulary used must be appropriate for CEFR level ${level}.`;
+    const prompt = `You are an expert language assessment creator specializing in ${skill} for English learners. Generate ${count} multiple-choice ${skill.toLowerCase()} questions suitable for a CEFR ${level} English learner. ${specificInstruction} Ensure correct grammar and spelling in all generated text. The difficulty of the questions and vocabulary used must be appropriate for CEFR level ${level}. Your entire response must be only the JSON object as defined in the response schema, with no other text preceding or following it.`;
 
-    const generativeModel = ai.getGenerativeModel({ model: GEMINI_MODEL_TEXT, safetySettings });
-    const result = await generativeModel.generateContent({
+    const result = await ai.models.generateContent({
+        model: GEMINI_MODEL_TEXT,
         contents: [{ role: "user", parts: [{ text: prompt }] }],
+        safetySettings: safetySettings,
         generationConfig: {
             ...generationConfigForTextModelsJSON,
             responseSchema: {
                 type: GoogleGenType.OBJECT,
-                properties: { questions: { type: GoogleGenType.ARRAY, items: {
+                properties: {
+                    questions: {
+                        type: GoogleGenType.ARRAY,
+                        items: {
                             type: GoogleGenType.OBJECT,
                             properties: {
-                                questionText: { type: GoogleGenType.STRING },
-                                options: { type: GoogleGenType.OBJECT, properties: { A: { type: GoogleGenType.STRING }, B: { type: GoogleGenType.STRING }, C: { type: GoogleGenType.STRING }, D: { type: GoogleGenType.STRING }}, required: ["A", "B", "C", "D"]},
-                                correctAnswerKey: { type: GoogleGenType.STRING }
-                            }, required: ["questionText", "options", "correctAnswerKey"]
-                        }}}, required: ["questions"]
+                                question_text: { type: GoogleGenType.STRING },
+                                options: {
+                                    type: GoogleGenType.ARRAY,
+                                    items: { // Schema for each option object
+                                        type: GoogleGenType.OBJECT,
+                                        properties: {
+                                            id: { type: GoogleGenType.STRING }, // AI now provides an ID for options (A, B, C)
+                                            text: { type: GoogleGenType.STRING }
+                                        },
+                                        required: ["id", "text"]
+                                    }
+                                },
+                                correct_option_id: { type: GoogleGenType.STRING } // New field from AI
+                            },
+                            required: ["question_text", "options", "correct_option_id"]
+                        }
+                    }
+                },
+                required: ["questions"]
             }
         }
     });
-    const payload = parseJsonFromGeminiResponse<GeneratedMCQPayload>(result.response.text());
-    return payload.questions.map((item, index) => ({
-        id: generateUniqueId(skill, level, index), skill, cefrLevel: level, questionText: item.questionText,
-        options: Object.entries(item.options).map(([key, value]) => ({ id: key, text: value })),
-        correctAnswerId: item.correctAnswerKey,
-    }));
+    console.log("generateMCQQuestions: Raw text from AI for parsing:", result.text);
+    const payload = parseJsonFromGeminiResponse<GeneratedMCQPayload>(result.text);
+    return payload.questions.map((aiQuestion, index) => {
+        // The AI now provides options with 'id' and 'text', and a 'correct_option_id' for the question.
+        const mappedOptions = aiQuestion.options.map(aiOption => ({
+            id: aiOption.id,       // Directly use the ID from the AI's option (e.g., "A", "B")
+            text: aiOption.text    // Directly use the text from the AI's option
+        }));
+
+        const mappedQuestionObject = {
+            id: generateUniqueId(skill, level, index), // Application-specific unique ID
+            skill: skill,
+            cefrLevel: level,
+            questionText: aiQuestion.question_text,    // Use snake_case from AI
+            options: mappedOptions,
+            correctAnswerId: aiQuestion.correct_option_id // Directly use from AI
+            // explanation: aiQuestion.explanation, // Optional: if AI provides it and you want to use it
+            // question_id_from_ai: aiQuestion.id, // Optional: if you want to keep AI's original question ID for some reason
+        };
+
+        // Ensure the detailed log for the mapped object (added in a previous step) is still present
+        // right before returning mappedQuestionObject, to help in the next testing phase.
+        console.log(`generateMCQQuestions: Mapped question object (index: ${index}):`, JSON.stringify(mappedQuestionObject, null, 2));
+
+        return mappedQuestionObject;
+    });
 }
 
 async function generateReadingTask(level: CEFRLevel): Promise<ReadingComprehensionTask[]> {
     if (!API_KEY) throw new Error("SERVER: GEMINI_API_KEY not configured.");
     const numSubQuestions = 2; // This variable is used in the prompt and response schema description.
-    const prompt = `You are an expert language assessment creator. Generate 1 reading comprehension task for a CEFR ${level} English learner. The task consists of a reading passage and ${numSubQuestions} multiple-choice questions about the passage. Passage length guidelines: A1/A2: 80-120 words; B1: 120-180 words; B2: 180-240 words; C1/C2: 240-300 words. Ensure content is appropriate for the CEFR level and all text values are in English.`;
+    const prompt = `You are an expert language assessment creator. Generate 1 reading comprehension task for a CEFR ${level} English learner. The task consists of a reading passage and ${numSubQuestions} multiple-choice questions about the passage. Passage length guidelines: A1/A2: 80-120 words; B1: 120-180 words; B2: 180-240 words; C1/C2: 240-300 words. Ensure content is appropriate for the CEFR level and all text values are in English. Your entire response must be only the JSON object as defined in the response schema, with no other text preceding or following it.`;
 
-    const generativeModel = ai.getGenerativeModel({ model: GEMINI_MODEL_TEXT, safetySettings });
-    const result = await generativeModel.generateContent({
+    const result = await ai.models.generateContent({
+        model: GEMINI_MODEL_TEXT,
         contents: [{ role: "user", parts: [{text: prompt }] }],
+        safetySettings: safetySettings,
         generationConfig: {
             ...generationConfigForTextModelsJSON,
             responseSchema: {
@@ -239,7 +277,8 @@ async function generateReadingTask(level: CEFRLevel): Promise<ReadingComprehensi
             }
         }
     });
-    const payload = parseJsonFromGeminiResponse<GeneratedReadingTaskPayload>(result.response.text());
+    console.log("generateReadingTask: Raw text from AI for parsing:", result.text);
+    const payload = parseJsonFromGeminiResponse<GeneratedReadingTaskPayload>(result.text);
     const mainTaskId = generateUniqueId(SkillType.READING, level, 0);
     return [{
         id: mainTaskId, skill: SkillType.READING, cefrLevel: level,
@@ -256,11 +295,12 @@ async function generateListeningTask(level: CEFRLevel): Promise<ListeningCompreh
     if (!API_KEY) throw new Error("SERVER: GEMINI_API_KEY not configured.");
     const numSubQuestions = 2;
     const [selectedVoice1, selectedVoice2] = selectDistinctVoicesForDialogue();
-    const prompt = `You are an expert language assessment creator. Pre-selected voices: VOICE_INFO_1 (${selectedVoice1.gender}, name '${selectedVoice1.name}', characteristic '${selectedVoice1.characteristic}') and VOICE_INFO_2 (${selectedVoice2.gender}, name '${selectedVoice2.name}', characteristic '${selectedVoice2.characteristic}'). Generate 1 listening task for CEFR ${level} with a short dialogue (2-4 turns/speaker). Speakers in JSON lines must match characterAssignment names. Ensure natural dialogue for voices/level. All text in English.`;
+    const prompt = `You are an expert language assessment creator. Pre-selected voices: VOICE_INFO_1 (${selectedVoice1.gender}, name '${selectedVoice1.name}', characteristic '${selectedVoice1.characteristic}') and VOICE_INFO_2 (${selectedVoice2.gender}, name '${selectedVoice2.name}', characteristic '${selectedVoice2.characteristic}'). Generate 1 listening task for CEFR ${level} with a short dialogue (2-4 turns/speaker). Speakers in JSON lines must match characterAssignment names. Ensure natural dialogue for voices/level. All text in English. Your entire response must be only the JSON object as defined in the response schema, with no other text preceding or following it.`;
 
-    const generativeModel = ai.getGenerativeModel({ model: GEMINI_MODEL_TEXT, safetySettings });
-    const result = await generativeModel.generateContent({
+    const result = await ai.models.generateContent({
+        model: GEMINI_MODEL_TEXT,
         contents: [{ role: "user", parts: [{text: prompt }] }],
+        safetySettings: safetySettings,
         generationConfig: {
             ...generationConfigForTextModelsJSON,
             responseSchema: {
@@ -285,7 +325,8 @@ async function generateListeningTask(level: CEFRLevel): Promise<ListeningCompreh
             }
         }
     });
-    const payload = parseJsonFromGeminiResponse<GeneratedListeningTaskPayload>(result.response.text());
+    console.log("generateListeningTask: Raw text from AI for parsing:", result.text);
+    const payload = parseJsonFromGeminiResponse<GeneratedListeningTaskPayload>(result.text);
     const mainTaskId = generateUniqueId(SkillType.LISTENING, level, 0);
     const speakerVoiceMap: { [scriptSpeakerName: string]: string } = {};
     speakerVoiceMap[payload.characterAssignment.character1_Name] = payload.characterAssignment.character1_TTSVoiceName;
@@ -310,10 +351,11 @@ async function generateListeningTask(level: CEFRLevel): Promise<ListeningCompreh
 
 async function generateWritingPrompt(level: CEFRLevel): Promise<WritingTask[]> {
     if (!API_KEY) throw new Error("SERVER: GEMINI_API_KEY not configured.");
-    const prompt = `You are an expert language assessment creator. Generate 1 writing prompt for a CEFR ${level} English learner. The prompt should encourage text of appropriate length (A1/A2: 40-60 words; B1/B2: 80-120 words; C1/C2: 150-200 words). All text in English.`;
-    const generativeModel = ai.getGenerativeModel({ model: GEMINI_MODEL_TEXT, safetySettings });
-    const result = await generativeModel.generateContent({
+    const prompt = `You are an expert language assessment creator. Generate 1 writing prompt for a CEFR ${level} English learner. The prompt should encourage text of appropriate length (A1/A2: 40-60 words; B1/B2: 80-120 words; C1/C2: 150-200 words). All text in English. Your entire response must be only the JSON object as defined in the response schema, with no other text preceding or following it.`;
+    const result = await ai.models.generateContent({
+        model: GEMINI_MODEL_TEXT,
         contents: [{ role: "user", parts: [{text: prompt }] }],
+        safetySettings: safetySettings,
         generationConfig: {
             ...generationConfigForTextModelsJSON,
             responseSchema: {
@@ -324,7 +366,8 @@ async function generateWritingPrompt(level: CEFRLevel): Promise<WritingTask[]> {
             }
         }
     });
-    const payload = parseJsonFromGeminiResponse<GeneratedWritingPromptPayload>(result.response.text());
+    console.log("generateWritingPrompt: Raw text from AI for parsing:", result.text);
+    const payload = parseJsonFromGeminiResponse<GeneratedWritingPromptPayload>(result.text);
     return [{
         id: generateUniqueId(SkillType.WRITING, level, 0), skill: SkillType.WRITING, cefrLevel: level,
         questionText: payload.prompt, taskDescription: payload.taskDescription,
@@ -333,10 +376,11 @@ async function generateWritingPrompt(level: CEFRLevel): Promise<WritingTask[]> {
 
 async function generateSpeakingPrompt(level: CEFRLevel): Promise<SpeakingTask[]> {
     if (!API_KEY) throw new Error("SERVER: GEMINI_API_KEY not configured.");
-    const prompt = `You are an expert language assessment creator. Generate 1 speaking prompt for a CEFR ${level} English learner. Encourage speech for an appropriate length (A1/A2: 30-60s; B1/B2: 1-2min; C1/C2: 2-3min). All text in English.`;
-    const generativeModel = ai.getGenerativeModel({ model: GEMINI_MODEL_TEXT, safetySettings });
-    const result = await generativeModel.generateContent({
+    const prompt = `You are an expert language assessment creator. Generate 1 speaking prompt for a CEFR ${level} English learner. Encourage speech for an appropriate length (A1/A2: 30-60s; B1/B2: 1-2min; C1/C2: 2-3min). All text in English. Your entire response must be only the JSON object as defined in the response schema, with no other text preceding or following it.`;
+    const result = await ai.models.generateContent({
+        model: GEMINI_MODEL_TEXT,
         contents: [{ role: "user", parts: [{text: prompt }] }],
+        safetySettings: safetySettings,
         generationConfig: {
             ...generationConfigForTextModelsJSON,
             responseSchema: {
@@ -348,7 +392,8 @@ async function generateSpeakingPrompt(level: CEFRLevel): Promise<SpeakingTask[]>
             }
         }
     });
-    const payload = parseJsonFromGeminiResponse<GeneratedSpeakingPromptPayload>(result.response.text());
+    console.log("generateSpeakingPrompt: Raw text from AI for parsing:", result.text);
+    const payload = parseJsonFromGeminiResponse<GeneratedSpeakingPromptPayload>(result.text);
     return [{
         id: generateUniqueId(SkillType.SPEAKING, level, 0), skill: SkillType.SPEAKING, cefrLevel: level,
         questionText: payload.prompt, taskDescription: payload.taskDescription,
@@ -371,10 +416,11 @@ export async function generateQuestionsForSkill(skill: SkillType, level: CEFRLev
 
 export async function assessStudentWriting(originalPromptText: string, studentText: string, level: CEFRLevel): Promise<WritingAssessmentPayload> {
     if (!API_KEY) throw new Error("SERVER: GEMINI_API_KEY not configured.");
-    const prompt = `A student at CEFR level ${level} was given the writing prompt: "${originalPromptText}". Student response: "${studentText}". Assess based on grammar, vocabulary, task achievement, coherence, cohesion for CEFR ${level}. Provide constructive feedback.`;
-    const generativeModel = ai.getGenerativeModel({ model: GEMINI_MODEL_TEXT, safetySettings });
-    const result = await generativeModel.generateContent({
+    const prompt = `A student at CEFR level ${level} was given the writing prompt: "${originalPromptText}". Student response: "${studentText}". Assess based on grammar, vocabulary, task achievement, coherence, cohesion for CEFR ${level}. Provide constructive feedback. Your entire response must be only the JSON object as defined in the response schema, with no other text preceding or following it.`;
+    const result = await ai.models.generateContent({
+        model: GEMINI_MODEL_TEXT,
         contents: [{ role: "user", parts: [{text: prompt }] }],
+        safetySettings: safetySettings,
         generationConfig: {
             ...generationConfigForTextModelsJSON,
             responseSchema: {
@@ -386,17 +432,19 @@ export async function assessStudentWriting(originalPromptText: string, studentTe
             }
         }
     });
-    return parseJsonFromGeminiResponse<WritingAssessmentPayload>(result.response.text());
+    console.log("assessStudentWriting: Raw text from AI for parsing:", result.text);
+    return parseJsonFromGeminiResponse<WritingAssessmentPayload>(result.text);
 }
 
 export async function assessStudentSpeaking(speakingPromptText: string, audioBase64: string, audioMimeType: string, level: CEFRLevel): Promise<SpeakingAssessmentPayload> {
     if (!API_KEY) throw new Error("SERVER: GEMINI_API_KEY not configured.");
-    const textPart = { text: `A student at CEFR level ${level} was given speaking prompt: "${speakingPromptText}". Their audio response is provided. Assess fluency, pronunciation, intonation, grammar, vocabulary, task fulfillment for CEFR ${level}.` };
+    const textPart = { text: `A student at CEFR level ${level} was given speaking prompt: "${speakingPromptText}". Their audio response is provided. Assess fluency, pronunciation, intonation, grammar, vocabulary, task fulfillment for CEFR ${level}. Your entire response must be only the JSON object as defined in the response schema, with no other text preceding or following it.` };
     const audioPart = { inlineData: { mimeType: audioMimeType, data: audioBase64 } };
 
-    const generativeModel = ai.getGenerativeModel({ model: GEMINI_MODEL_TEXT, safetySettings });
-    const result = await generativeModel.generateContent({
+    const result = await ai.models.generateContent({
+        model: GEMINI_MODEL_TEXT,
         contents: [{ role: "user", parts: [textPart, audioPart as Part] }],
+        safetySettings: safetySettings,
         generationConfig: {
             ...generationConfigForTextModelsJSON,
             responseSchema: {
@@ -408,7 +456,8 @@ export async function assessStudentSpeaking(speakingPromptText: string, audioBas
             }
         }
     });
-    return parseJsonFromGeminiResponse<SpeakingAssessmentPayload>(result.response.text());
+    console.log("assessStudentSpeaking: Raw text from AI for parsing:", result.text);
+    return parseJsonFromGeminiResponse<SpeakingAssessmentPayload>(result.text);
 }
 
 const cefrOrder: CEFRLevel[] = [CEFRLevel.A1, CEFRLevel.A2, CEFRLevel.B1, CEFRLevel.B2, CEFRLevel.C1, CEFRLevel.C2];
@@ -434,11 +483,12 @@ export async function generateComprehensiveReport(studentName: string, sectionRe
         }
         return details;
     }).join('\\n');
-    const prompt = `A student named ${studentName} completed an assessment for CEFR level ${assessedLevel}. Performance summary: ${resultsSummary}. Generate a comprehensive report. Ensure *_pt fields are in Brazilian Portuguese. English text should be professional.`;
+    const prompt = `A student named ${studentName} completed an assessment for CEFR level ${assessedLevel}. Performance summary: ${resultsSummary}. Generate a comprehensive report. Ensure *_pt fields are in Brazilian Portuguese. English text should be professional. Your entire response must be only the JSON object as defined in the response schema, with no other text preceding or following it.`;
 
-    const generativeModel = ai.getGenerativeModel({ model: GEMINI_MODEL_TEXT, safetySettings });
-    const result = await generativeModel.generateContent({
+    const result = await ai.models.generateContent({
+        model: GEMINI_MODEL_TEXT,
         contents: [{ role: "user", parts: [{text: prompt }] }],
+        safetySettings: safetySettings,
         generationConfig: {
             ...generationConfigForTextModelsJSON,
             responseSchema: {
@@ -462,7 +512,8 @@ export async function generateComprehensiveReport(studentName: string, sectionRe
             }
         }
     });
-    const payload = parseJsonFromGeminiResponse<FinalReportPayload>(result.response.text());
+    console.log("generateComprehensiveReport: Raw text from AI for parsing:", result.text);
+    const payload = parseJsonFromGeminiResponse<FinalReportPayload>(result.text);
     let levelProgressionSuggestionPt = "";
     const assessedBaseLevel = getBaseCefr(assessedLevel);
     const estimatedBaseLevel = getBaseCefr(payload.overallEstimatedCefrLevel);

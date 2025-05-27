@@ -85,10 +85,15 @@ export const LanguageAssessmentFlow: React.FC = () => {
         try {
             console.log(`LanguageAssessmentFlow: Calling Server Action for questions. Skill: ${currentSkill}, Level: ${selectedCefrLevel}`);
             const result = await generateQuestionsAction(currentSkill, selectedCefrLevel);
-            if ('error' in result) throw new Error(result.error);
+            console.log("LanguageAssessmentFlow: Result from generateQuestionsAction:", JSON.stringify(result, null, 2));
+            if ('error' in result) {
+                console.error("LanguageAssessmentFlow: Error received from action:", result.error);
+                throw new Error(result.error);
+            }
+            console.log("LanguageAssessmentFlow: Attempting to set questionsForCurrentSkill to:", JSON.stringify(result, null, 2));
             setQuestionsForCurrentSkill(result);
         } catch (err) {
-            console.error("LanguageAssessmentFlow: Error loading questions:", err);
+            console.error("LanguageAssessmentFlow: Error loading questions:", err); // This will catch errors thrown above or from the action itself
             const skillName = ptTranslations[`skill_${currentSkill?.toLowerCase().replace(/\s+/g, '_') as keyof typeof ptTranslations}`] || currentSkill || "skill";
             if (err instanceof Error) {
                 setError(ptTranslations.error_failed_to_load_questions(skillName as string) + ` (${err.message})`);

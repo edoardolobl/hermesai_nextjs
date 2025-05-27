@@ -45,10 +45,12 @@ export async function generateQuestionsAction(
 ): Promise<AnyQuestion[] | { error: string }> {
     try {
         // QUESTIONS_PER_SKILL is now correctly imported and used by originalGenerateQuestions
-        return originalGenerateQuestions(skill, level, QUESTIONS_PER_SKILL);
+        const questions = await originalGenerateQuestions(skill, level, QUESTIONS_PER_SKILL);
+        console.log("generateQuestionsAction: Questions received from service:", JSON.stringify(questions, null, 2));
+        return questions;
     } catch (error) {
         if (error instanceof Error) {
-            console.error("Server Action Error (generateQuestionsAction):", error.message);
+            console.error("Server Action Error (generateQuestionsAction):", error.message, error.stack); // Enhanced logging
             return { error: `Failed to generate questions: ${error.message}` };
         }
         console.error("Server Action Error (generateQuestionsAction): Unknown error", error);

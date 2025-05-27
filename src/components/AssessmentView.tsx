@@ -49,6 +49,8 @@ export const AssessmentView: React.FC<AssessmentViewProps> = ({
                                                                   currentProgress,
                                                                   onGenerateTTSAudio
                                                               }) => {
+    console.log(`AssessmentView (Skill: ${skill}): Received questions prop:`, JSON.stringify(questions, null, 2)); // ADD THIS LINE
+
     const [currentAnswers, setCurrentAnswers] = useState<Map<string, string>>(new Map());
     const [currentSubQuestionIndex, setCurrentSubQuestionIndex] = useState(0);
 
@@ -394,7 +396,7 @@ export const AssessmentView: React.FC<AssessmentViewProps> = ({
                     <Button onClick={handleNextSubQuestion} disabled={!canProceed()}>{ptTranslations.next_question_button}</Button>
                 ) : (
                     (displayableQuestions.length > 0 || (skill === SkillType.WRITING && questions.length > 0) || (skill === SkillType.SPEAKING && mainTask != null)) &&
-                    <Button onClick={handleSubmitSection} disabled={!canProceed()} id="submit-section-button">{ptTranslations.submit_section_button}</Button>
+                    <Button onClick={handleSubmitSection} disabled={!canProceed} id="submit-section-button">{ptTranslations.submit_section_button}</Button>
                 )}
             </div>
         </div>
